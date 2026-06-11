@@ -44,4 +44,35 @@ assert.strictEqual(alias.quantity, 3);
 assert.strictEqual(alias.city, "Астана");
 assert.strictEqual(alias.niche, "Электроника");
 
+[
+  ["Джуди Mi010, 147 деталей 1 шт.", 1],
+  ["MiBaby флоссер 50 шт 1 шт.", 1],
+  ["Конструктор 1000 деталей 2 шт.", 2],
+  ["Патчи 288 шт 1 шт.", 1],
+  ["Товар обычный 3 шт.", 3],
+  ["Флоссер 1.5 м 1 шт.", 1]
+].forEach(function ([productLine, expectedQuantity], index) {
+  const parsed = parser.parseWaybill(
+    "123 456 " + String(780 + index) + "\n" + productLine + "\nАлматы",
+    "quantity-" + index + ".pdf"
+  );
+  assert.strictEqual(parsed.quantity, expectedQuantity, productLine);
+});
+
+const ambiguousPack = parser.parseWaybill(
+  "123 456 790\nMiBaby флоссер 50 шт\nАлматы",
+  "ambiguous-pack.pdf"
+);
+assert.strictEqual(ambiguousPack.quantity, 1);
+assert.match(ambiguousPack.productName, /50 шт/i);
+
+const splitInvoiceQuantity = parser.parseWaybill(
+  "123 456 791\nMiBaby флоссер 50 шт\n1 шт.\nАлматы",
+  "split-quantity.pdf"
+);
+assert.strictEqual(splitInvoiceQuantity.quantity, 1);
+assert.match(splitInvoiceQuantity.productName, /50 шт/i);
+assert.match(splitInvoiceQuantity.textSnippet, /MiBaby флоссер 50 шт/i);
+assert.strictEqual(splitInvoiceQuantity.confidence, "high");
+
 console.log("Parser tests passed");
