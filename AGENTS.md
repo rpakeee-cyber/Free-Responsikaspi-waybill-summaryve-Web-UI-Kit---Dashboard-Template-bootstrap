@@ -38,6 +38,7 @@ Build a static, browser-only dashboard that reads ZIP archives containing text-b
 ## Verification
 
 - Run `node tests/parser.test.js`.
+- Run `node tests/model.test.js`.
 - Open `Theme1/index.html` through a local static server.
 - Verify desktop and mobile layouts.
 - Test a ZIP containing multiple text-based PDFs, including at least one unreadable file.
