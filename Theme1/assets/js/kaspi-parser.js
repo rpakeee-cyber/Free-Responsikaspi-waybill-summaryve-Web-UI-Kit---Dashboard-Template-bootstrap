@@ -60,10 +60,21 @@
   const META_LINE = /(?:план\w*\s+дата|доставк|вес\s*:|адрес\s*:|получател|отправител|штрих|накладн|заказ\s*№|итого|стоимост|телефон)/i;
   const SERVICE_PATTERN = /(?:^|[\s,;:(])(IRBIS|ПВЗ|пункт\s+выдачи|точка\s+выдачи|Kaspi\s*(?:Post|Postomat|Delivery)|постамат|курьер\w*\s+служб\w*|служба\s+доставки)(?=$|[\s,;:).])/iu;
   const QUANTITY_PATTERNS = [
-    /(\d{1,4})\s*(?:шт\.?|штук(?:а|и)?|pcs?)(?=$|[\s,;:!?])/giu,
-    /(?:^|[\s,;])(?:x|х|×)\s*(\d{1,4})\b/gi,
-    /(\d{1,4})\s*(?:x|х|×)(?=$|[\s,;])/gi
+    {
+      type: "unit",
+      pattern: /(\d{1,4})\s*(?:шт\.?|штук(?:а|и)?|pcs?)(?=$|[\s,;:!?])/giu
+    },
+    {
+      type: "multiplier",
+      pattern: /(?:^|[\s,;])(?:x|х|×)\s*(\d{1,4})\b/gi
+    },
+    {
+      type: "multiplier",
+      pattern: /(\d{1,4})\s*(?:x|х|×)(?=$|[\s,;])/gi
+    }
   ];
+  const PACKAGE_PRODUCT_PATTERN = /(?:lego|лего|конструктор|набор|детал|флоссер|патч|упаков|комплект)/iu;
+  const CONTENT_DESCRIPTOR_PATTERN = /\d+(?:[.,]\d+)?\s*(?:детал(?:ь|и|ей)|метр(?:а|ов)?|м|см|мм|мл|л|гр|г|кг|размер\w*|модел\w*|артикул\w*)(?=$|[\s,;:.)])/iu;
 
   function normalizeWhitespace(value) {
     return String(value || "")
@@ -137,7 +148,8 @@
 
   function collectQuantityCandidates(line) {
     const candidates = [];
-    QUANTITY_PATTERNS.forEach(function (pattern) {
+    QUANTITY_PATTERNS.forEach(function (definition) {
+      const pattern = definition.pattern;
       pattern.lastIndex = 0;
       let match;
       while ((match = pattern.exec(line))) {
@@ -147,7 +159,8 @@
             quantity,
             start: match.index,
             end: match.index + match[0].length,
-            raw: match[0].trim()
+            raw: match[0].trim(),
+            type: definition.type
           });
         }
       }
@@ -156,6 +169,36 @@
     return candidates.sort(function (a, b) {
       return a.start - b.start;
     });
+  }
+
+  function findOrderedQuantity(line) {
+    const value = normalizeWhitespace(line);
+    const terminalCandidates = collectQuantityCandidates(value).filter(function (candidate) {
+      return /^[\s,;:.!?)]*$/.test(value.slice(candidate.end));
+    });
+
+    if (!terminalCandidates.length) return null;
+
+    const selected = terminalCandidates[terminalCandidates.length - 1];
+    if (terminalCandidates.length > 1 || selected.type === "multiplier") {
+      return selected;
+    }
+
+    const productPart = value.slice(0, selected.start);
+    const looksLikePackDescription =
+      PACKAGE_PRODUCT_PATTERN.test(productPart) &&
+      !CONTENT_DESCRIPTOR_PATTERN.test(productPart);
+
+    return looksLikePackDescription ? null : selected;
+  }
+
+  function isStandaloneQuantityLine(line) {
+    const value = normalizeWhitespace(line);
+    const selected = findOrderedQuantity(value);
+    if (!selected) return false;
+    return normalizeWhitespace(
+      value.slice(0, selected.start) + " " + value.slice(selected.end)
+    ).replace(/^[\s,;:.!?()–—-]+|[\s,;:.!?()–—-]+$/g, "").length === 0;
   }
 
   function isProductLine(line) {
@@ -190,8 +233,7 @@
     }
 
     if (
-      best.quantities.length &&
-      normalizeWhitespace(best.line.replace(QUANTITY_PATTERNS[0], "")).length < 4 &&
+      isStandaloneQuantityLine(best.line) &&
       best.index > 0 &&
       isProductLine(lines[best.index - 1])
     ) {
@@ -200,6 +242,19 @@
         line: previous + " " + best.line,
         index: best.index - 1,
         quantities: collectQuantityCandidates(previous + " " + best.line),
+        score: best.score
+      };
+    }
+
+    if (
+      best.index + 1 < lines.length &&
+      isStandaloneQuantityLine(lines[best.index + 1])
+    ) {
+      const combined = best.line + " " + lines[best.index + 1];
+      return {
+        line: combined,
+        index: best.index,
+        quantities: collectQuantityCandidates(combined),
         score: best.score
       };
     }
@@ -328,9 +383,7 @@
 
     const orderNumber = findOrderNumber(normalizedText, fileName);
     const selectedLine = selectProductLine(lines);
-    const selectedQuantity = selectedLine.quantities.length
-      ? selectedLine.quantities[selectedLine.quantities.length - 1]
-      : null;
+    const selectedQuantity = findOrderedQuantity(selectedLine.line);
     const rawProductName = cleanProductName(
       selectedLine.line,
       selectedQuantity,
@@ -364,6 +417,7 @@
     normalizeKey,
     findOrderNumber,
     findCity,
+    findOrderedQuantity,
     classifyNiche,
     parseWaybill
   };
